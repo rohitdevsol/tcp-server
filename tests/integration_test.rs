@@ -1,3 +1,4 @@
+use tcp_server::{read_frame, write_frame};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 mod helpers;
@@ -31,11 +32,9 @@ async fn drop_conn_mid_frame() {
     let mut client = helpers::connect(addr).await;
 
     let header = 4u32.to_be_bytes();
-
     helpers::send_raw(&mut client, &header).await;
 
     client.shutdown().await.unwrap();
-
     let result = h.await.unwrap();
     assert!(result.is_err());
 }
@@ -51,4 +50,21 @@ async fn over_limit_buffer() {
     let mut buf = vec![0; msg.len()];
     let res = client.read_exact(&mut buf).await;
     assert!(res.is_err());
+}
+
+#[tokio::test]
+async fn write_then_read_frame_over_duplex() {
+    let (mut client_side, mut server_side) = tokio::io::duplex(1024);
+
+    // write a frame into client_side
+
+    let payload = b"or bhai kya hal hai";
+    write_frame(&mut client_side, payload, 200).await.unwrap();
+
+    // read it back out of server_side
+
+    let buf = read_frame(&mut server_side, 200).await.unwrap();
+    // assert the payload matches
+
+    assert_eq!(buf, payload);
 }

@@ -56,15 +56,20 @@ async fn over_limit_buffer() {
 async fn write_then_read_frame_over_duplex() {
     let (mut client_side, mut server_side) = tokio::io::duplex(1024);
 
-    // write a frame into client_side
-
     let payload = b"or bhai kya hal hai";
     write_frame(&mut client_side, payload, 200).await.unwrap();
-
-    // read it back out of server_side
-
     let buf = read_frame(&mut server_side, 200).await.unwrap();
-    // assert the payload matches
 
     assert_eq!(buf, payload);
+}
+
+#[tokio::test]
+async fn read_frame_rejects_oversized_payload() {
+    let (mut client_side, mut server_side) = tokio::io::duplex(1024);
+
+    let payload = vec![b'y'; 300];
+    write_frame(&mut client_side, &payload, 1000).await.unwrap();
+    let result = read_frame(&mut server_side, 200).await;
+
+    assert!(result.is_err());
 }

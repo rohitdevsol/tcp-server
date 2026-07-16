@@ -24,7 +24,7 @@ pub async fn process_stream(mut stream: TcpStream) -> std::io::Result<()> {
             String::from_utf8_lossy(&buf[..payload_size])
         );
 
-        // stream.write_all(&header_buf).await?;
+        stream.write_all(&header_buf).await?;
         stream.write_all(&buf[..payload_size]).await?;
     }
 }

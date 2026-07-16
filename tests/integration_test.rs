@@ -1,5 +1,5 @@
 use tcp_server::process_stream;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 #[tokio::test]
@@ -16,8 +16,16 @@ async fn test_ten_messages() {
 
     for i in 0..10u8 {
         let msg = format!("msg{i}");
-        client.write_all(msg.as_bytes()).await.unwrap();
+        let header = msg.len();
+        let mut payload = Vec::with_capacity(4 + msg.len());
+        payload.extend_from_slice(&(header as u32).to_be_bytes());
+        payload.extend_from_slice(msg.as_bytes());
+
+        client.write_all(&payload).await.unwrap();
+
+        let mut buf = vec![0; msg.len()];
+        client.read_exact(&mut buf).await.unwrap();
+
+        assert_eq!(buf, msg.as_bytes())
     }
-    client.shutdown().await.unwrap();
-    h.await.unwrap()
 }

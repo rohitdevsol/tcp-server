@@ -1,31 +1,19 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
+use std::io::Error;
+use tcp_server::process_stream;
 
 #[tokio::main]
-async fn main() {
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
+async fn main() -> Result<(), Error> {
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
     loop {
-        let (mut stream, socket_addr) = listener.accept().await.unwrap();
-       tokio::spawn( async move {
-            process_stream(&mut stream).await
-        });
-
-    }
-}
-
-// need a function that can handle stream
-async fn process_stream(stream:&mut TcpStream) {
-    // we need to process this stream
-    let mut buf = [0;10];
-
-    loop {
-        let res = stream.read(&mut buf).await.unwrap();
-        if res ==0 {
-            break;
-        } // this is here to deal with the FIN packet thingy i.e 0
-
-        // now I know there are res number of bytes that are read
-        println!("The client sent this message {:?}", String::from_utf8_lossy(&buf[..res]));
-        stream.write_all(&buf[..res]).await.unwrap();
+        if let Ok((stream, addr)) = listener.accept().await {
+            println!("Got a new connection from client : {}", addr);
+            tokio::spawn(async move {
+                if let Err(e) = process_stream(stream).await {
+                    eprintln!("Connection error {e}");
+                }
+            });
+        } else {
+            println!("accept() failed")
+        }
     }
 }

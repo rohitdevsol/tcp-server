@@ -11,10 +11,21 @@ pub async fn start_server() -> (std::net::SocketAddr, JoinHandle<std::io::Result
     let clients = Clients::new(Mutex::new(HashMap::new()));
 
     let handle = tokio::spawn(async move {
-        let (stream, sock_addr) = listener.accept().await.unwrap();
+        // let (stream, sock_addr) = listener.accept().await.unwrap();
+        //
+        // let (read_half, write_half) = stream.into_split();
+        // process_stream(read_half, sock_addr, clients).await
+        loop {
+            if let Ok((stream, sock_addr)) = listener.accept().await {
+                let (read_half, write_half) = stream.into_split();
+                clients.lock().await.insert(sock_addr, write_half);
 
-        let (read_half, write_half) = stream.into_split();
-        process_stream(read_half, sock_addr, clients).await
+                let c = clients.clone();
+                tokio::spawn(async move {
+                    let _ = process_stream(read_half, sock_addr, c).await;
+                });
+            }
+        }
     });
 
     (addr, handle)

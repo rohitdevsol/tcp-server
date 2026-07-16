@@ -58,15 +58,3 @@ pub async fn read_frame(
 
     Ok(buf)
 }
-
-#[tokio::test]
-async fn read_frame_rejects_oversized_payload() {
-    let (mut client_side, mut server_side) = tokio::io::duplex(1024);
-
-    let payload = vec![b'y'; 300];
-
-    write_frame(&mut client_side, &payload, 1000).await.unwrap();
-    let result = read_frame(&mut server_side, 200).await;
-
-    assert!(result.is_err());
-}

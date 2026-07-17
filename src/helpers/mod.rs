@@ -1,28 +1,32 @@
-use crate::{Clients, process_stream};
-use std::collections::HashMap;
+use crate::{Broadcast, socket_reader_loop, socket_writer_loop};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, broadcast};
 use tokio::task::JoinHandle;
 
 pub async fn start_server() -> (std::net::SocketAddr, JoinHandle<std::io::Result<()>>) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let clients = Clients::new(Mutex::new(HashMap::new()));
+
+    let (tx, _) = broadcast::channel::<Broadcast>(16);
 
     let handle = tokio::spawn(async move {
-        // let (stream, sock_addr) = listener.accept().await.unwrap();
-        //
-        // let (read_half, write_half) = stream.into_split();
-        // process_stream(read_half, sock_addr, clients).await
         loop {
             if let Ok((stream, sock_addr)) = listener.accept().await {
                 let (read_half, write_half) = stream.into_split();
-                clients.lock().await.insert(sock_addr, write_half);
+                let rx = tx.subscribe();
+                let tx_clone = tx.clone();
 
-                let c = clients.clone();
                 tokio::spawn(async move {
-                    let _ = process_stream(read_half, sock_addr, c).await;
+                    if let Err(e) = socket_reader_loop(read_half, tx_clone, sock_addr).await {
+                        eprintln!("Reader error {e}");
+                    }
+                });
+
+                tokio::spawn(async move {
+                    if let Err(e) = socket_writer_loop(write_half, rx, sock_addr).await {
+                        eprintln!("Writer error {e}");
+                    }
                 });
             }
         }

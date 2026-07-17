@@ -1,7 +1,7 @@
 use std::io::{Error, ErrorKind};
 use std::net::SocketAddr;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-
+use tokio::sync::broadcast;
 // AsyncReadExt is a blanket implementation on top of AsyncRead and same goes for the AsyncWriteExt
 
 /**
@@ -17,38 +17,37 @@ pub mod helpers;
 mod types;
 
 use constants::{MAX_BUFFER_SIZE, MAX_HEADER_SIZE};
-pub use types::Clients;
+pub use types::Broadcast;
 
-pub async fn process_stream(
-    // not just tcp stream we gonna accept anything that is readable and writable
-    mut read_stream: impl AsyncRead + Unpin,
-    curr_socket_addr: SocketAddr,
-    clients: Clients,
-) -> std::io::Result<()> {
-    let result = process_loop(&mut read_stream, curr_socket_addr, &clients).await;
-    clients.lock().await.remove(&curr_socket_addr);
-    result
-}
-
-async fn process_loop(
-    read_stream: &mut (impl AsyncRead + Unpin),
-    curr_socket_addr: SocketAddr,
-    clients: &Clients,
+//runs when someone sends a message
+pub async fn socket_reader_loop(
+    mut read_half: impl AsyncRead + Unpin,
+    sender: broadcast::Sender<Broadcast>,
+    socket_addr: SocketAddr,
 ) -> std::io::Result<()> {
     loop {
-        let buf = read_frame(read_stream, MAX_BUFFER_SIZE).await?;
-        println!("Received: {}", String::from_utf8_lossy(&buf));
+        let buf = read_frame(&mut read_half, MAX_BUFFER_SIZE).await?;
+        let _ = sender.send((socket_addr, buf));
+    }
+}
 
-        let mut all_clients = clients.lock().await;
-        for (sock_addr, write_stream) in all_clients.iter_mut() {
-            if *sock_addr != curr_socket_addr {
-                match write_frame(write_stream, &buf, MAX_BUFFER_SIZE).await {
-                    Ok(_) => {}
-                    Err(e) => {
-                        println!("Error while writing :{}", e);
-                    }
+// runs when someone receives some message
+pub async fn socket_writer_loop(
+    mut write_half: impl AsyncWrite + Unpin,
+    mut receiver: broadcast::Receiver<Broadcast>,
+    socket_addr: SocketAddr,
+) -> std::io::Result<()> {
+    loop {
+        match receiver.recv().await {
+            Ok(buf) => {
+                if buf.0 != socket_addr {
+                    write_frame(&mut write_half, &buf.1, MAX_BUFFER_SIZE).await?;
                 }
             }
+            Err(broadcast::error::RecvError::Lagged(n)) => {
+                eprintln!("Lagged behind {n} messages, continuing");
+            }
+            Err(broadcast::error::RecvError::Closed) => return Ok(()),
         }
     }
 }
@@ -77,7 +76,6 @@ pub async fn read_frame(
     stream.read_exact(&mut header_buf).await?;
 
     let payload_size = u32::from_be_bytes(header_buf) as usize;
-    eprintln!("Read payload size is: {}", payload_size);
 
     if payload_size > max_size {
         return Err(Error::new(

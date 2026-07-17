@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use std::io::Error;
 use tcp_server::{Broadcast, socket_reader_loop, socket_writer_loop};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::broadcast;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -18,15 +17,15 @@ async fn main() -> Result<(), Error> {
 
             let rx = tx.subscribe();
             let tx_clone = tx.clone();
+            let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
             tokio::spawn(async move {
-                if let Err(e) = socket_reader_loop(read_half, tx_clone, addr).await {
-                    eprintln!("Reader error {e}");
-                }
+                let _ = socket_reader_loop(read_half, tx_clone, addr).await;
+                let _ = shutdown_tx.send(());
             });
 
             tokio::spawn(async move {
-                if let Err(e) = socket_writer_loop(write_half, rx, addr).await {
+                if let Err(e) = socket_writer_loop(write_half, rx, addr, shutdown_rx).await {
                     eprintln!("Writer error {e}");
                 }
             });

@@ -1,7 +1,7 @@
 use crate::{Broadcast, socket_reader_loop, socket_writer_loop};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 pub async fn start_server() -> (std::net::SocketAddr, JoinHandle<std::io::Result<()>>) {
@@ -16,15 +16,16 @@ pub async fn start_server() -> (std::net::SocketAddr, JoinHandle<std::io::Result
                 let (read_half, write_half) = stream.into_split();
                 let rx = tx.subscribe();
                 let tx_clone = tx.clone();
+                let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
 
                 tokio::spawn(async move {
-                    if let Err(e) = socket_reader_loop(read_half, tx_clone, sock_addr).await {
-                        eprintln!("Reader error {e}");
-                    }
+                    let _ = socket_reader_loop(read_half, tx_clone, sock_addr).await;
+                    let _ = shutdown_tx.send(());
                 });
 
                 tokio::spawn(async move {
-                    if let Err(e) = socket_writer_loop(write_half, rx, sock_addr).await {
+                    if let Err(e) = socket_writer_loop(write_half, rx, sock_addr, shutdown_rx).await
+                    {
                         eprintln!("Writer error {e}");
                     }
                 });

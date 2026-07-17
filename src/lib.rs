@@ -36,18 +36,27 @@ pub async fn socket_writer_loop(
     mut write_half: impl AsyncWrite + Unpin,
     mut receiver: broadcast::Receiver<Broadcast>,
     socket_addr: SocketAddr,
+    mut shutdown_rx: tokio::sync::oneshot::Receiver<()>,
 ) -> std::io::Result<()> {
     loop {
-        match receiver.recv().await {
-            Ok(buf) => {
-                if buf.0 != socket_addr {
-                    write_frame(&mut write_half, &buf.1, MAX_BUFFER_SIZE).await?;
-                }
+        tokio::select! {
+            msg = receiver.recv() => {
+               match msg {
+                     Ok(buf) => {
+                        if buf.0 != socket_addr {
+                            write_frame(&mut write_half, &buf.1, MAX_BUFFER_SIZE).await?;
+                        }
+                     }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        eprintln!("Lagged behind {n} messages, continuing");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => return Ok(())
+
+               }
             }
-            Err(broadcast::error::RecvError::Lagged(n)) => {
-                eprintln!("Lagged behind {n} messages, continuing");
+            _ = &mut shutdown_rx => {
+                return Ok(());
             }
-            Err(broadcast::error::RecvError::Closed) => return Ok(()),
         }
     }
 }

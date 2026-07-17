@@ -1,5 +1,5 @@
 server:
-	cargo run
+	cargo run --bin tcp-server
 
 client:
 	cargo run --bin client
